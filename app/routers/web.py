@@ -1,12 +1,10 @@
 """
 Web Interface Router
 
-This module provides HTML-based web interface endpoints for the Notes application.
+This module provides HTML-based web interface endpoints for the Password Manager.
 """
 
-from typing import Optional
 from uuid import UUID
-
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -14,8 +12,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.note import NoteCreate, NoteUpdate
-from app.services.note_service import get_note_service
+from app.schemas.password_entry import PasswordEntryCreate, PasswordEntryUpdate
+from app.services.password_entry_service import get_password_entry_service
+from app.services.folder_service import get_folder_service
 
 # Create web router
 router = APIRouter(
@@ -23,13 +22,14 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Templates will be injected from main app
-templates: Optional[Jinja2Templates] = None
-
 
 def get_templates(request: Request) -> Jinja2Templates:
     """Get templates from app state."""
     return request.app.state.templates
+
+
+# TEMPORARY: Hardcoded user ID for testing (in real app, use authentication)
+TEMP_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -38,22 +38,23 @@ async def web_index(
     db: Session = Depends(get_db)
 ):
     """
-    Home page showing all notes.
-    
-    This is the main landing page that displays all notes in a simple list
-    with options to create, edit, or delete notes.
+    Home page showing all password entries.
     """
     try:
-        service = get_note_service(db)
-        notes = service.get_all_notes()
+        entry_service = get_password_entry_service(db)
+        folder_service = get_folder_service(db)
+        
+        entries = entry_service.get_all_entries_for_user(TEMP_USER_ID)
+        folders = folder_service.get_all_folders_for_user(TEMP_USER_ID)
         
         templates = get_templates(request)
         return templates.TemplateResponse(
             "index.html",
             {
                 "request": request,
-                "notes": notes,
-                "title": "All Notes"
+                "entries": entries,
+                "folders": folders,
+                "title": "Password Manager"
             }
         )
     except SQLAlchemyError as e:
@@ -63,103 +64,23 @@ async def web_index(
         )
 
 
-@router.get("/notes/create", response_class=HTMLResponse)
-async def web_notes_create_form(request: Request):
-    """
-    Display the create note form.
-    
-    Shows an empty form for creating a new note.
-    """
-    templates = get_templates(request)
-    return templates.TemplateResponse(
-        "notes/create.html",
-        {
-            "request": request,
-            "title": "Create New Note"
-        }
-    )
-
-
-@router.post("/notes/create")
-async def web_notes_create_submit(
+@router.get("/entries/create", response_class=HTMLResponse)
+async def web_entries_create_form(
     request: Request,
-    content: str = Form(..., min_length=1, max_length=10000),
     db: Session = Depends(get_db)
 ):
-    """
-    Process the create note form submission.
-    
-    Creates a new note and redirects to the home page.
-    Uses POST-redirect-GET pattern to prevent duplicate submissions.
-    """
+    """Display the create entry form."""
     try:
-        # Validate and create note
-        note_data = NoteCreate(content=content.strip())
-        service = get_note_service(db)
-        service.create_note(note_data)
-        
-        # Redirect to home page after successful creation
-        return RedirectResponse(
-            url="/",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-        
-    except ValueError as e:
-        # Handle validation errors
-        templates = get_templates(request)
-        return templates.TemplateResponse(
-            "notes/create.html",
-            {
-                "request": request,
-                "title": "Create New Note",
-                "error": str(e),
-                "content": content
-            },
-            status_code=status.HTTP_400_BAD_REQUEST
-        )
-    except SQLAlchemyError as e:
-        # Handle database errors
-        templates = get_templates(request)
-        return templates.TemplateResponse(
-            "notes/create.html",
-            {
-                "request": request,
-                "title": "Create New Note",
-                "error": "Failed to create note. Please try again.",
-                "content": content
-            },
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
-@router.get("/notes/{note_id}/edit", response_class=HTMLResponse)
-async def web_notes_edit_form(
-    request: Request,
-    note_id: UUID,
-    db: Session = Depends(get_db)
-):
-    """
-    Display the edit note form.
-    
-    Shows a form pre-populated with the existing note content.
-    """
-    try:
-        service = get_note_service(db)
-        note = service.get_note_by_id(note_id)
-        
-        if not note:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Note with ID {note_id} not found"
-            )
+        folder_service = get_folder_service(db)
+        folders = folder_service.get_all_folders_for_user(TEMP_USER_ID)
         
         templates = get_templates(request)
         return templates.TemplateResponse(
-            "notes/edit.html",
+            "entries/create.html",
             {
                 "request": request,
-                "note": note,
-                "title": "Edit Note"
+                "folders": folders,
+                "title": "Create New Entry"
             }
         )
     except SQLAlchemyError as e:
@@ -169,99 +90,322 @@ async def web_notes_edit_form(
         )
 
 
-@router.post("/notes/{note_id}/edit")
-async def web_notes_edit_submit(
+@router.post("/entries/create")
+async def web_entries_create_submit(
     request: Request,
-    note_id: UUID,
-    content: str = Form(..., min_length=1, max_length=10000),
+    name: str = Form(..., min_length=1, max_length=100),
+    username: str = Form(None, max_length=100),
+    password: str = Form(None),
+    website_url: str = Form(None, max_length=500),
+    notes: str = Form(None),
+    folder_id: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    """
-    Process the edit note form submission.
-    
-    Updates the existing note and redirects to the home page.
-    Uses POST-redirect-GET pattern to prevent duplicate submissions.
-    """
+    """Process the create entry form submission."""
     try:
-        # Validate and update note
-        note_data = NoteUpdate(content=content.strip())
-        service = get_note_service(db)
-        note = service.update_note(note_id, note_data)
+        entry_service = get_password_entry_service(db)
         
-        if not note:
+        # Convert folder_id if provided
+        folder_uuid = UUID(folder_id) if folder_id and folder_id != "" else None
+        
+        entry_data = PasswordEntryCreate(
+            name=name,
+            username=username if username else None,
+            password=password if password else None,
+            website_url=website_url if website_url else None,
+            notes=notes if notes else None,
+            folder_id=folder_uuid
+        )
+        
+        entry_service.create_entry(TEMP_USER_ID, entry_data)
+        
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.get("/entries/{entry_id}", response_class=HTMLResponse)
+async def web_entries_detail(
+    request: Request,
+    entry_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Display entry details."""
+    try:
+        entry_service = get_password_entry_service(db)
+        entry = entry_service.get_entry_by_id(entry_id, TEMP_USER_ID)
+        
+        if not entry:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Note with ID {note_id} not found"
+                detail="Entry not found"
             )
         
-        # Redirect to home page after successful update
+        templates = get_templates(request)
+        return templates.TemplateResponse(
+            "entries/detail.html",
+            {
+                "request": request,
+                "entry": entry,
+                "title": entry.name
+            }
+        )
+        
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.get("/entries/{entry_id}/edit", response_class=HTMLResponse)
+async def web_entries_edit_form(
+    request: Request,
+    entry_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Display the edit entry form."""
+    try:
+        entry_service = get_password_entry_service(db)
+        folder_service = get_folder_service(db)
+        
+        entry = entry_service.get_entry_by_id(entry_id, TEMP_USER_ID)
+        if not entry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Entry not found"
+            )
+        
+        folders = folder_service.get_all_folders_for_user(TEMP_USER_ID)
+        
+        templates = get_templates(request)
+        return templates.TemplateResponse(
+            "entries/edit.html",
+            {
+                "request": request,
+                "entry": entry,
+                "folders": folders,
+                "title": f"Edit {entry.name}"
+            }
+        )
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/entries/{entry_id}/edit")
+async def web_entries_edit_submit(
+    request: Request,
+    entry_id: UUID,
+    name: str = Form(..., min_length=1, max_length=100),
+    username: str = Form(None, max_length=100),
+    password: str = Form(None),
+    website_url: str = Form(None, max_length=500),
+    notes: str = Form(None),
+    folder_id: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Process the edit entry form submission."""
+    try:
+        entry_service = get_password_entry_service(db)
+        
+        # Convert folder_id if provided
+        folder_uuid = UUID(folder_id) if folder_id and folder_id != "" else None
+        
+        entry_data = PasswordEntryUpdate(
+            name=name,
+            username=username if username else None,
+            password=password if password else None,
+            website_url=website_url if website_url else None,
+            notes=notes if notes else None,
+            folder_id=folder_uuid
+        )
+        
+        updated_entry = entry_service.update_entry(entry_id, TEMP_USER_ID, entry_data)
+        
+        if not updated_entry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Entry not found"
+            )
+        
         return RedirectResponse(
-            url="/",
+            url=f"/entries/{entry_id}", 
             status_code=status.HTTP_303_SEE_OTHER
         )
         
     except ValueError as e:
-        # Handle validation errors - show form again with error
-        service = get_note_service(db)
-        note = service.get_note_by_id(note_id)
-        
-        templates = get_templates(request)
-        return templates.TemplateResponse(
-            "notes/edit.html",
-            {
-                "request": request,
-                "note": note,
-                "title": "Edit Note",
-                "error": str(e),
-                "content": content
-            },
-            status_code=status.HTTP_400_BAD_REQUEST
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
     except SQLAlchemyError as e:
-        # Handle database errors
-        service = get_note_service(db)
-        note = service.get_note_by_id(note_id)
-        
-        templates = get_templates(request)
-        return templates.TemplateResponse(
-            "notes/edit.html",
-            {
-                "request": request,
-                "note": note,
-                "title": "Edit Note",
-                "error": "Failed to update note. Please try again.",
-                "content": content
-            },
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
         )
 
 
-@router.post("/notes/{note_id}/delete")
-async def web_notes_delete(
-    note_id: UUID,
+@router.post("/entries/{entry_id}/delete")
+async def web_entries_delete(
+    entry_id: UUID,
     db: Session = Depends(get_db)
 ):
-    """
-    Delete a note.
-    
-    Deletes the specified note and redirects to the home page.
-    This endpoint is called via form submission or JavaScript.
-    """
+    """Delete an entry."""
     try:
-        service = get_note_service(db)
-        deleted = service.delete_note(note_id)
+        entry_service = get_password_entry_service(db)
+        deleted = entry_service.delete_entry(entry_id, TEMP_USER_ID)
         
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Note with ID {note_id} not found"
+                detail="Entry not found"
             )
         
-        # Redirect to home page after successful deletion
-        return RedirectResponse(
-            url="/",
-            status_code=status.HTTP_303_SEE_OTHER
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+        
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
         )
+
+
+# ==================== FOLDER ROUTES ====================
+
+@router.get("/folders", response_class=HTMLResponse)
+async def web_folders_list(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Display all folders."""
+    try:
+        folder_service = get_folder_service(db)
+        folders = folder_service.get_all_folders_for_user(TEMP_USER_ID)
+        
+        templates = get_templates(request)
+        return templates.TemplateResponse(
+            "folders/list.html",
+            {
+                "request": request,
+                "folders": folders,
+                "title": "Folders"
+            }
+        )
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.get("/folders/create", response_class=HTMLResponse)
+async def web_folders_create_form(request: Request):
+    """Display the create folder form."""
+    templates = get_templates(request)
+    return templates.TemplateResponse(
+        "folders/create.html",
+        {
+            "request": request,
+            "title": "Create New Folder"
+        }
+    )
+
+
+@router.post("/folders/create")
+async def web_folders_create_submit(
+    request: Request,
+    name: str = Form(..., min_length=1, max_length=100),
+    db: Session = Depends(get_db)
+):
+    """Process the create folder form submission."""
+    try:
+        from app.schemas.folder import FolderCreate
+        folder_service = get_folder_service(db)
+        
+        folder_data = FolderCreate(name=name)
+        folder_service.create_folder(TEMP_USER_ID, folder_data)
+        
+        return RedirectResponse(url="/folders", status_code=status.HTTP_303_SEE_OTHER)
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.get("/folders/{folder_id}", response_class=HTMLResponse)
+async def web_folders_detail(
+    request: Request,
+    folder_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Display folder details with entries."""
+    try:
+        folder_service = get_folder_service(db)
+        entry_service = get_password_entry_service(db)
+        
+        folder = folder_service.get_folder_by_id(folder_id, TEMP_USER_ID)
+        if not folder:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Folder not found"
+            )
+        
+        # Get entries in this folder
+        entries = entry_service.get_all_entries_for_user(TEMP_USER_ID, folder_id=folder_id)
+        
+        templates = get_templates(request)
+        return templates.TemplateResponse(
+            "folders/detail.html",
+            {
+                "request": request,
+                "folder": folder,
+                "entries": entries,
+                "title": folder.name
+            }
+        )
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/folders/{folder_id}/delete")
+async def web_folders_delete(
+    folder_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Delete a folder."""
+    try:
+        folder_service = get_folder_service(db)
+        deleted = folder_service.delete_folder(folder_id, TEMP_USER_ID)
+        
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Folder not found"
+            )
+        
+        return RedirectResponse(url="/folders", status_code=status.HTTP_303_SEE_OTHER)
         
     except SQLAlchemyError as e:
         raise HTTPException(

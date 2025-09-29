@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Create New Password Entry</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="/entries/create">
+                            <div class="mb-3">
+                                <label for="name" class="form-label">Name *</label>
+                                <input type="text" class="form-control" id="name" name="name" 
+                                       required maxlength="100" placeholder="e.g., Gmail Account">
+                                <small class="text-muted">A descriptive name for this entry</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="username" class="form-label">Username/Email</label>
+                                <input type="text" class="form-control" id="username" name="username" 
+                                       maxlength="100" placeholder="e.g., user@example.com">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="password" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="password" name="password" 
+                                       placeholder="Enter password">
+                                <small class="text-muted">⚠️ Warning: Password will be stored in plain text (encryption not yet implemented)</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="website_url" class="form-label">Website URL</label>
+                                <input type="url" class="form-control" id="website_url" name="website_url" 
+                                       maxlength="500" placeholder="https://example.com">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="notes" class="form-label">Notes</label>
+                                <textarea class="form-control" id="notes" name="notes" 
+                                          rows="3" placeholder="Additional notes..."></textarea>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="folder_id" class="form-label">Folder (Optional)</label>
+                                <select class="form-select" id="folder_id" name="folder_id">
+                                    <option value="">No Folder</option>
+                                    {% for folder in folders %}
+                                    <option value="{{ folder.folder_id }}">{{ folder.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                <a href="/" class="btn btn-secondary">Cancel</a>
+                                <button type="submit" class="btn btn-primary">Create Entry</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

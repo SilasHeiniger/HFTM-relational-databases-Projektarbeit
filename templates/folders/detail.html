@@ -6,10 +6,6 @@
     <title>{{ title }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body {
-            padding-top: 20px;
-            background-color: #f8f9fa;
-        }
         .entry-card {
             margin-bottom: 15px;
             transition: transform 0.2s;
@@ -18,28 +14,18 @@
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
-        .password-field {
-            font-family: monospace;
-            background-color: #f8f9fa;
-            padding: 8px;
-            border-radius: 4px;
-        }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="container mt-4">
         <div class="row mb-4">
             <div class="col">
-                <h1>🔐 Password Manager</h1>
-                <p class="text-muted">Simple password manager application</p>
+                <h1>📁 {{ folder.name }}</h1>
+                <p class="text-muted">Entries in this folder</p>
             </div>
             <div class="col-auto">
-                <a href="/folders" class="btn btn-outline-primary me-2">
-                    📁 Folders
-                </a>
-                <a href="/entries/create" class="btn btn-primary">
-                    ➕ New Entry
-                </a>
+                <a href="/folders" class="btn btn-outline-secondary me-2">← Back to Folders</a>
+                <a href="/entries/create" class="btn btn-primary">➕ New Entry</a>
             </div>
         </div>
 
@@ -50,12 +36,6 @@
                     <div class="card entry-card">
                         <div class="card-body">
                             <h5 class="card-title">{{ entry.name }}</h5>
-                            
-                            {% if entry.folder_id %}
-                            <p class="card-text">
-                                <span class="badge bg-secondary">📁 In Folder</span>
-                            </p>
-                            {% endif %}
                             
                             {% if entry.username %}
                             <p class="card-text">
@@ -87,13 +67,6 @@
                                 <a href="/entries/{{ entry.entry_id }}/edit" class="btn btn-sm btn-outline-secondary">
                                     Edit
                                 </a>
-                                
-                                <form method="POST" action="/entries/{{ entry.entry_id }}/delete" style="display: inline;">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger" 
-                                            onclick="return confirm('Are you sure you want to delete this entry?')">
-                                        Delete
-                                    </button>
-                                </form>
                             </div>
                         </div>
                     </div>
@@ -102,10 +75,19 @@
             </div>
         {% else %}
             <div class="alert alert-info">
-                <h4>No password entries yet!</h4>
-                <p>Click the "New Entry" button to create your first password entry.</p>
+                <h4>No entries in this folder yet!</h4>
+                <p>Create a new entry and assign it to this folder.</p>
             </div>
         {% endif %}
+
+        <div class="mt-4">
+            <form method="POST" action="/folders/{{ folder.folder_id }}/delete">
+                <button type="submit" class="btn btn-danger" 
+                        onclick="return confirm('Are you sure? Entries in this folder will not be deleted, just unassigned.')">
+                    🗑️ Delete This Folder
+                </button>
+            </form>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
